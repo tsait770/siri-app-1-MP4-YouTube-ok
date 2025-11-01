@@ -1,6 +1,7 @@
 import createContextHook from '@nkzw/create-context-hook';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
+import { supabase } from '@/lib/supabase';
+import { useAuth } from './use-auth';
 
 export type MembershipTier = 'free_trial' | 'free' | 'basic' | 'premium';
 
@@ -48,6 +49,7 @@ const MEMBERSHIP_LIMITS: Record<MembershipTier, MembershipLimits> = {
 };
 
 export const [MembershipProvider, useMembership] = createContextHook(() => {
+  const { user, isLoading: authLoading } = useAuth();
   const [membershipStatus, setMembershipStatus] = useState<MembershipStatus>({
     tier: 'free_trial',
     usageCount: 0,
@@ -58,96 +60,147 @@ export const [MembershipProvider, useMembership] = createContextHook(() => {
   });
   const [isLoading, setIsLoading] = useState(true);
 
-  useEffect(() => {
-    loadMembershipStatus();
-  }, []);
-
-  const loadMembershipStatus = async () => {
+  const loadMembershipStatus = useCallback(async () => {
     try {
-      const stored = await AsyncStorage.getItem('membershipStatus');
-      if (stored) {
-        const status = JSON.parse(stored) as MembershipStatus;
-        // Check if we need to reset daily usage
-        const today = new Date().toISOString().split('T')[0];
-        if (status.lastResetDate !== today) {
-          status.dailyUsageCount = 0;
-          status.lastResetDate = today;
-          await saveMembershipStatus(status);
-        }
-        setMembershipStatus(status);
-      } else {
-        // First time user - give free trial
-        const initialStatus: MembershipStatus = {
-          tier: 'free_trial',
-          usageCount: 0,
-          dailyUsageCount: 0,
-          lastResetDate: new Date().toISOString().split('T')[0],
-          trialUsed: false,
-          registrationDate: new Date().toISOString(),
-        };
-        await saveMembershipStatus(initialStatus);
-        setMembershipStatus(initialStatus);
+      if (!user) {
+        setIsLoading(false);
+        return;
       }
+
+      const { data, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+
+      if (error || !data) {
+        console.error('Error loading membership status:', error);
+        setIsLoading(false);
+        return;
+      }
+
+      const today = new Date().toISOString().split('T')[0];
+      let needsUpdate = false;
+      let updatedData = { ...data };
+
+      if (data.last_daily_reset !== today) {
+        updatedData.daily_free_quota = 0;
+        updatedData.last_daily_reset = today;
+        needsUpdate = true;
+      }
+
+      const currentMonth = new Date().toISOString().slice(0, 7);
+      const lastMonthReset = data.last_monthly_reset?.slice(0, 7);
+      if (lastMonthReset !== currentMonth) {
+        updatedData.monthly_basic_quota = 0;
+        updatedData.last_monthly_reset = today;
+        needsUpdate = true;
+      }
+
+      if (needsUpdate) {
+        await supabase
+          .from('users')
+          .update({
+            daily_free_quota: updatedData.daily_free_quota,
+            monthly_basic_quota: updatedData.monthly_basic_quota,
+            last_daily_reset: updatedData.last_daily_reset,
+            last_monthly_reset: updatedData.last_monthly_reset,
+          })
+          .eq('id', user.id);
+      }
+
+      setMembershipStatus({
+        tier: updatedData.membership_level,
+        usageCount: updatedData.free_trial_remaining,
+        dailyUsageCount: updatedData.daily_free_quota,
+        lastResetDate: updatedData.last_daily_reset,
+        trialUsed: updatedData.membership_level !== 'free_trial',
+        registrationDate: updatedData.created_at,
+      });
     } catch (error) {
       console.error('Error loading membership status:', error);
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [user]);
 
-  const saveMembershipStatus = async (status: MembershipStatus) => {
+  useEffect(() => {
+    if (!authLoading) {
+      loadMembershipStatus();
+    }
+  }, [user, authLoading, loadMembershipStatus]);
+
+  const incrementUsage = useCallback(async (): Promise<boolean> => {
+    if (!user) return false;
+
     try {
-      await AsyncStorage.setItem('membershipStatus', JSON.stringify(status));
-    } catch (error) {
-      console.error('Error saving membership status:', error);
-    }
-  };
-
-  const incrementUsage = async (): Promise<boolean> => {
-    const limits = MEMBERSHIP_LIMITS[membershipStatus.tier];
-    const today = new Date().toISOString().split('T')[0];
-    
-    // Reset daily count if needed
-    let currentStatus = { ...membershipStatus };
-    if (currentStatus.lastResetDate !== today) {
-      currentStatus.dailyUsageCount = 0;
-      currentStatus.lastResetDate = today;
-    }
-
-    // Check limits
-    if (limits.dailyLimit > 0 && currentStatus.dailyUsageCount >= limits.dailyLimit) {
-      return false; // Daily limit exceeded
-    }
-    
-    if (limits.totalLimit > 0 && currentStatus.usageCount >= limits.totalLimit) {
-      // Trial expired, downgrade to free
-      if (currentStatus.tier === 'free_trial') {
-        currentStatus.tier = 'free';
-        currentStatus.trialUsed = true;
-      } else {
-        return false; // Total limit exceeded
+      const limits = MEMBERSHIP_LIMITS[membershipStatus.tier];
+      const today = new Date().toISOString().split('T')[0];
+      
+      let currentStatus = { ...membershipStatus };
+      if (currentStatus.lastResetDate !== today) {
+        currentStatus.dailyUsageCount = 0;
+        currentStatus.lastResetDate = today;
       }
+
+      if (limits.dailyLimit > 0 && currentStatus.dailyUsageCount >= limits.dailyLimit) {
+        return false;
+      }
+      
+      if (limits.totalLimit > 0 && currentStatus.usageCount >= limits.totalLimit) {
+        if (currentStatus.tier === 'free_trial') {
+          currentStatus.tier = 'free';
+          currentStatus.trialUsed = true;
+          
+          await supabase
+            .from('users')
+            .update({ membership_level: 'free' })
+            .eq('id', user.id);
+        } else {
+          return false;
+        }
+      }
+
+      currentStatus.usageCount += 1;
+      currentStatus.dailyUsageCount += 1;
+
+      await supabase
+        .from('users')
+        .update({
+          free_trial_remaining: currentStatus.usageCount,
+          daily_free_quota: currentStatus.dailyUsageCount,
+          last_daily_reset: currentStatus.lastResetDate,
+        })
+        .eq('id', user.id);
+
+      setMembershipStatus(currentStatus);
+      return true;
+    } catch (error) {
+      console.error('Error incrementing usage:', error);
+      return false;
     }
+  }, [user, membershipStatus]);
 
-    // Increment usage
-    currentStatus.usageCount += 1;
-    currentStatus.dailyUsageCount += 1;
+  const upgradeMembership = useCallback(async (newTier: MembershipTier) => {
+    if (!user) return;
 
-    await saveMembershipStatus(currentStatus);
-    setMembershipStatus(currentStatus);
-    return true;
-  };
+    try {
+      await supabase
+        .from('users')
+        .update({ membership_level: newTier })
+        .eq('id', user.id);
 
-  const upgradeMembership = async (newTier: MembershipTier) => {
-    const updatedStatus = {
-      ...membershipStatus,
-      tier: newTier,
-    };
-    await saveMembershipStatus(updatedStatus);
-    setMembershipStatus(updatedStatus);
-  };
+      const updatedStatus = {
+        ...membershipStatus,
+        tier: newTier,
+      };
+      setMembershipStatus(updatedStatus);
+    } catch (error) {
+      console.error('Error upgrading membership:', error);
+    }
+  }, [user, membershipStatus]);
 
-  const getRemainingUsage = () => {
+  const getRemainingUsage = useCallback(() => {
     const limits = MEMBERSHIP_LIMITS[membershipStatus.tier];
     const today = new Date().toISOString().split('T')[0];
     
@@ -162,11 +215,11 @@ export const [MembershipProvider, useMembership] = createContextHook(() => {
       canUse: (limits.dailyLimit <= 0 || currentStatus.dailyUsageCount < limits.dailyLimit) &&
               (limits.totalLimit <= 0 || currentStatus.usageCount < limits.totalLimit),
     };
-  };
+  }, [membershipStatus]);
 
-  const getMembershipLimits = () => MEMBERSHIP_LIMITS[membershipStatus.tier];
+  const getMembershipLimits = useCallback(() => MEMBERSHIP_LIMITS[membershipStatus.tier], [membershipStatus.tier]);
 
-  return {
+  return useMemo(() => ({
     membershipStatus,
     isLoading,
     incrementUsage,
@@ -174,5 +227,5 @@ export const [MembershipProvider, useMembership] = createContextHook(() => {
     getRemainingUsage,
     getMembershipLimits,
     MEMBERSHIP_LIMITS,
-  };
+  }), [membershipStatus, isLoading, incrementUsage, upgradeMembership, getRemainingUsage, getMembershipLimits]);
 });

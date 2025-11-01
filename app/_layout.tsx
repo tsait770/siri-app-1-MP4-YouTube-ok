@@ -8,6 +8,7 @@ import { VoiceCommandProvider } from '@/hooks/use-voice-commands';
 import { I18nProvider } from '@/hooks/use-i18n';
 import { MembershipProvider } from '@/hooks/use-membership';
 import { ThemeProvider } from '@/hooks/use-theme';
+import { AuthProvider } from '@/hooks/use-auth';
 import { trpc, trpcClient } from '@/lib/trpc';
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
@@ -31,19 +32,21 @@ export default function RootLayout() {
   return (
     <trpc.Provider client={trpcClient} queryClient={queryClient}>
       <QueryClientProvider client={queryClient}>
-        <ThemeProvider>
-          <I18nProvider>
-            <MembershipProvider>
-              <GestureHandlerRootView>
-                <VideoPlayerProvider>
-                  <VoiceCommandProvider>
-                    <RootLayoutNav />
-                  </VoiceCommandProvider>
-                </VideoPlayerProvider>
-              </GestureHandlerRootView>
-            </MembershipProvider>
-          </I18nProvider>
-        </ThemeProvider>
+        <AuthProvider>
+          <ThemeProvider>
+            <I18nProvider>
+              <MembershipProvider>
+                <GestureHandlerRootView>
+                  <VideoPlayerProvider>
+                    <VoiceCommandProvider>
+                      <RootLayoutNav />
+                    </VoiceCommandProvider>
+                  </VideoPlayerProvider>
+                </GestureHandlerRootView>
+              </MembershipProvider>
+            </I18nProvider>
+          </ThemeProvider>
+        </AuthProvider>
       </QueryClientProvider>
     </trpc.Provider>
   );
