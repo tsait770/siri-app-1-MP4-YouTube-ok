@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Platform, Alert, PermissionsAndroid } from 'react-native';
+import { Platform, PermissionsAndroid } from 'react-native';
 import { useI18n } from './use-i18n';
 
 export interface VoiceCommand {
@@ -43,16 +43,10 @@ export const [VoiceCommandProvider, useVoiceCommands] = createContextHook(() => 
     lastConfidence: undefined,
   });
   const [customCommands, setCustomCommands] = useState<Record<string, string>>({});
-  const recognitionRef = useRef<any>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
   const persistentRecognitionRef = useRef<any>(null);
   const restartTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const maxSessionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const speechRecognizerRef = useRef<any>(null);
-  const audioEngineRef = useRef<any>(null);
-  const recognitionTaskRef = useRef<any>(null);
-  const recognitionRequestRef = useRef<any>(null);
   const webRetryCountRef = useRef<number>(0);
   const webMaxRetriesRef = useRef<number>(2);
   const webRestartingRef = useRef<boolean>(false);
@@ -96,6 +90,47 @@ export const [VoiceCommandProvider, useVoiceCommands] = createContextHook(() => 
   }, []);
 
   // 階段 1：授權與環境設定 - 純 Speech Framework 實現
+  const requestWebSpeechAuthorization = useCallback(async () => {
+    try {
+      // 檢查 Web Speech API 支援
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      
+      if (!SpeechRecognition) {
+        setState(prev => ({
+          ...prev,
+          error: 'Speech Recognition not supported in this browser. Please use Chrome, Edge, or Safari.',
+          recognitionAvailable: false,
+          authorizationStatus: 'restricted'
+        }));
+        return false;
+      }
+      
+      // 請求麥克風權限
+      await navigator.mediaDevices.getUserMedia({ audio: true });
+      console.log('Web microphone permission granted');
+      
+      setState(prev => ({
+        ...prev,
+        isAuthorized: true,
+        authorizationStatus: 'authorized',
+        recognitionAvailable: true,
+        error: undefined
+      }));
+      
+      return true;
+    } catch (error) {
+      console.error('Web speech authorization failed:', error);
+      setState(prev => ({
+        ...prev,
+        error: 'Microphone permission is required for voice commands',
+        isAuthorized: false,
+        authorizationStatus: 'denied',
+        recognitionAvailable: false
+      }));
+      return false;
+    }
+  }, []);
+  
   const requestSpeechAuthorization = useCallback(async () => {
     console.log('🎤 Requesting Speech Framework authorization...');
     
@@ -181,48 +216,7 @@ export const [VoiceCommandProvider, useVoiceCommands] = createContextHook(() => 
       // Web 平台使用 Web Speech API
       return await requestWebSpeechAuthorization();
     }
-  }, []);
-  
-  const requestWebSpeechAuthorization = useCallback(async () => {
-    try {
-      // 檢查 Web Speech API 支援
-      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-      
-      if (!SpeechRecognition) {
-        setState(prev => ({
-          ...prev,
-          error: 'Speech Recognition not supported in this browser. Please use Chrome, Edge, or Safari.',
-          recognitionAvailable: false,
-          authorizationStatus: 'restricted'
-        }));
-        return false;
-      }
-      
-      // 請求麥克風權限
-      await navigator.mediaDevices.getUserMedia({ audio: true });
-      console.log('Web microphone permission granted');
-      
-      setState(prev => ({
-        ...prev,
-        isAuthorized: true,
-        authorizationStatus: 'authorized',
-        recognitionAvailable: true,
-        error: undefined
-      }));
-      
-      return true;
-    } catch (error) {
-      console.error('Web speech authorization failed:', error);
-      setState(prev => ({
-        ...prev,
-        error: 'Microphone permission is required for voice commands',
-        isAuthorized: false,
-        authorizationStatus: 'denied',
-        recognitionAvailable: false
-      }));
-      return false;
-    }
-  }, []);
+  }, [requestWebSpeechAuthorization]);
   
   // 階段 2：語音辨識基礎流程
   const getSpeechLocale = useCallback((lang: string): string => {
@@ -286,156 +280,12 @@ export const [VoiceCommandProvider, useVoiceCommands] = createContextHook(() => 
   const initializeSpeechRecognizer = useCallback(async () => {
     console.log('🎤 Initializing speech recognizer...');
     
-    if (Platform.OS === 'ios') {
-      try {
-        const { SFSpeechRecognizer, AVAudioEngine } = require('react-native');
-        
-        const locale = getSpeechLocale(language);
-        const recognizer = new SFSpeechRecognizer(locale);
-        speechRecognizerRef.current = recognizer;
-        
-        const audioEngine = new AVAudioEngine();
-        audioEngineRef.current = audioEngine;
-        
-        console.log('✅ iOS Speech Framework initialized with locale:', locale);
-        return true;
-      } catch (error) {
-        console.error('Failed to initialize iOS Speech Framework:', error);
-        return await initializeWebSpeechRecognizer();
-      }
-    } else {
-      return await initializeWebSpeechRecognizer();
-    }
-  }, [language, getSpeechLocale, initializeWebSpeechRecognizer]);
-  
-  // 階段 3：共通語音流程 - 完整的語音控制流程
-  const executeVoiceControlFlow = useCallback(async (videoControls: any) => {
-    console.log('🎤 === 開始語音控制流程 ===');
-    
-    try {
-      // 步驟 1：檢查麥克風與語音辨識權限
-      console.log('步驟 1：檢查權限狀態');
-      if (!state.isAuthorized) {
-        console.log('權限未授權，導向授權流程');
-        const authorized = await requestSpeechAuthorization();
-        if (!authorized) {
-          console.log('❌ 權限授權失敗');
-          setState(prev => ({
-            ...prev,
-            error: '語音辨識權限被拒絕，請在設定中允許麥克風權限'
-          }));
-          return { success: false, message: '權限被拒絕' };
-        }
-      }
-      
-      // 步驟 2：調用本地語音辨識 API
-      console.log('步驟 2：啟動語音辨識');
-      const recognitionSuccess = await startSpeechRecognition();
-      if (!recognitionSuccess) {
-        console.log('❌ 語音辨識啟動失敗');
-        setState(prev => ({
-          ...prev,
-          error: '語音辨識啟動失敗，請重試'
-        }));
-        return { success: false, message: '辨識啟動失敗' };
-      }
-      
-      console.log('✅ 語音控制流程啟動成功');
-      return { success: true, message: '語音辨識已啟動' };
-    } catch (error) {
-      console.error('❌ 語音控制流程錯誤:', error);
-      setState(prev => ({
-        ...prev,
-        error: '語音控制流程發生錯誤'
-      }));
-      return { success: false, message: '流程執行錯誤' };
-    }
-  }, [state.isAuthorized, requestSpeechAuthorization]);
+    // iOS Speech Framework is not available in React Native without native modules
+    // Always use Web Speech API fallback
+    return await initializeWebSpeechRecognizer();
+  }, [initializeWebSpeechRecognizer]);
   
   // 階段 3：語音指令解析與影片控制 - 啟動語音辨識
-  const startSpeechRecognition = useCallback(async () => {
-    console.log('🎤 Starting speech recognition...');
-    
-    if (!state.isAuthorized) {
-      const authorized = await requestSpeechAuthorization();
-      if (!authorized) {
-        return false;
-      }
-    }
-    
-    if (Platform.OS === 'ios' && speechRecognizerRef.current && audioEngineRef.current) {
-      try {
-        const { SFSpeechAudioBufferRecognitionRequest } = require('react-native');
-        
-        // 建立 SFSpeechAudioBufferRecognitionRequest
-        const request = new SFSpeechAudioBufferRecognitionRequest();
-        recognitionRequestRef.current = request;
-        
-        // 設定音訊引擎
-        const audioEngine = audioEngineRef.current;
-        const inputNode = audioEngine.inputNode;
-        const recordingFormat = inputNode.outputFormatForBus(0);
-        
-        // 安裝音訊 tap
-        inputNode.installTapOnBus(0, 1024, recordingFormat, (buffer: any, when: any) => {
-          request.appendAudioPCMBuffer(buffer);
-        });
-        
-        // 啟動音訊引擎
-        audioEngine.prepare();
-        await audioEngine.start();
-        
-        // 啟動 recognitionTask
-        const recognizer = speechRecognizerRef.current;
-        const task = recognizer.recognitionTaskWithRequest(request, (result: any, error: any) => {
-          if (error) {
-            console.error('Speech recognition error:', error);
-            setState(prev => ({
-              ...prev,
-              error: `語音辨識錯誤: ${error.localizedDescription}`,
-              isListening: false,
-              isRecording: false
-            }));
-            return;
-          }
-          
-          if (result) {
-            const text = result.bestTranscription.formattedString;
-            console.log('Speech recognition result:', text);
-            
-            setState(prev => ({
-              ...prev,
-              lastCommand: text.toLowerCase().trim(),
-              error: undefined
-            }));
-            
-            if (result.isFinal) {
-              console.log('Final speech result:', text);
-              stopSpeechRecognition();
-            }
-          }
-        });
-        
-        recognitionTaskRef.current = task;
-        
-        setState(prev => ({
-          ...prev,
-          isListening: true,
-          isRecording: true,
-          error: undefined
-        }));
-        
-        console.log('✅ iOS Speech Framework recognition started');
-        return true;
-      } catch (error) {
-        console.error('Failed to start iOS speech recognition:', error);
-        return await startWebSpeechRecognition();
-      }
-    } else {
-      return await startWebSpeechRecognition();
-    }
-  }, [state.isAuthorized, requestSpeechAuthorization]);
-  
   const startWebSpeechRecognition = useCallback(async () => {
     try {
       if (!speechRecognizerRef.current) {
@@ -661,36 +511,70 @@ export const [VoiceCommandProvider, useVoiceCommands] = createContextHook(() => 
       }));
       return false;
     }
-  }, [initializeWebSpeechRecognizer]);
+  }, [initializeWebSpeechRecognizer, state.confidenceThreshold, state.isPersistentMode, state.isRecording]);
+
+  const startSpeechRecognition = useCallback(async () => {
+    console.log('🎤 Starting speech recognition...');
+    
+    if (!state.isAuthorized) {
+      const authorized = await requestSpeechAuthorization();
+      if (!authorized) {
+        return false;
+      }
+    }
+    
+    // Always use Web Speech API
+    return await startWebSpeechRecognition();
+  }, [state.isAuthorized, requestSpeechAuthorization, startWebSpeechRecognition]);
+  
+  // 階段 3：共通語音流程 - 完整的語音控制流程
+  const executeVoiceControlFlow = useCallback(async (videoControls: any) => {
+    console.log('🎤 === 開始語音控制流程 ===');
+    
+    try {
+      // 步驟 1：檢查麥克風與語音辨識權限
+      console.log('步驟 1：檢查權限狀態');
+      if (!state.isAuthorized) {
+        console.log('權限未授權，導向授權流程');
+        const authorized = await requestSpeechAuthorization();
+        if (!authorized) {
+          console.log('❌ 權限授權失敗');
+          setState(prev => ({
+            ...prev,
+            error: '語音辨識權限被拒絕，請在設定中允許麥克風權限'
+          }));
+          return { success: false, message: '權限被拒絕' };
+        }
+      }
+      
+      // 步驟 2：調用本地語音辨識 API
+      console.log('步驟 2：啟動語音辨識');
+      const recognitionSuccess = await startSpeechRecognition();
+      if (!recognitionSuccess) {
+        console.log('❌ 語音辨識啟動失敗');
+        setState(prev => ({
+          ...prev,
+          error: '語音辨識啟動失敗，請重試'
+        }));
+        return { success: false, message: '辨識啟動失敗' };
+      }
+      
+      console.log('✅ 語音控制流程啟動成功');
+      return { success: true, message: '語音辨識已啟動' };
+    } catch (error) {
+      console.error('❌ 語音控制流程錯誤:', error);
+      setState(prev => ({
+        ...prev,
+        error: '語音控制流程發生錯誤'
+      }));
+      return { success: false, message: '流程執行錯誤' };
+    }
+  }, [state.isAuthorized, requestSpeechAuthorization, startSpeechRecognition]);
   
   const stopSpeechRecognition = useCallback(() => {
     console.log('🛑 Stopping speech recognition...');
     
-    if (Platform.OS === 'ios') {
-      try {
-        // 停止 iOS Speech Framework
-        if (recognitionTaskRef.current) {
-          recognitionTaskRef.current.cancel();
-          recognitionTaskRef.current = null;
-        }
-        
-        if (recognitionRequestRef.current) {
-          recognitionRequestRef.current.endAudio();
-          recognitionRequestRef.current = null;
-        }
-        
-        if (audioEngineRef.current) {
-          audioEngineRef.current.stop();
-          audioEngineRef.current.inputNode.removeTapOnBus(0);
-        }
-        
-        console.log('✅ iOS Speech Framework stopped');
-      } catch (error) {
-        console.error('Error stopping iOS speech recognition:', error);
-      }
-    }
-    
-    // 停止 Web Speech Recognition
+    // Stop Web Speech Recognition
     if (speechRecognizerRef.current && speechRecognizerRef.current.stop) {
       try {
         speechRecognizerRef.current.stop();
@@ -730,10 +614,11 @@ export const [VoiceCommandProvider, useVoiceCommands] = createContextHook(() => 
             restartTimeoutRef.current = null;
           }
           
+          const locale = getSpeechLocale(language);
           const recognition = new SpeechRecognition();
           recognition.continuous = true;
           recognition.interimResults = false;
-          recognition.lang = getSpeechLocale(language);
+          recognition.lang = locale;
           recognition.maxAlternatives = 1;
           
           // Add timeout settings to prevent hanging
@@ -945,7 +830,7 @@ export const [VoiceCommandProvider, useVoiceCommands] = createContextHook(() => 
         isListening: false
       }));
     }
-  }, [language]);
+  }, [language, getSpeechLocale, state.confidenceThreshold]);
 
   const stopPersistentListening = useCallback(() => {
     console.log('Stopping persistent listening mode...');
@@ -1076,23 +961,6 @@ export const [VoiceCommandProvider, useVoiceCommands] = createContextHook(() => 
       
       // 初始化語音辨識器
       await initializeSpeechRecognizer();
-      
-      // 檢查授權狀態（但不自動請求）
-      if (Platform.OS === 'ios') {
-        try {
-          const { SFSpeechRecognizer } = require('react-native');
-          const authStatus = SFSpeechRecognizer.authorizationStatus();
-          
-          setState(prev => ({
-            ...prev,
-            authorizationStatus: authStatus,
-            isAuthorized: authStatus === 'authorized',
-            recognitionAvailable: SFSpeechRecognizer.isSupported()
-          }));
-        } catch (error) {
-          console.log('iOS Speech Framework not available, using web fallback');
-        }
-      }
     };
     
     // 延遲初始化以避免 hydration 問題
@@ -1341,12 +1209,6 @@ export const [VoiceCommandProvider, useVoiceCommands] = createContextHook(() => 
   useEffect(() => {
     return () => {
       stopPersistentListening();
-      if (recognitionRef.current) {
-        recognitionRef.current.stop();
-      }
-      if (mediaRecorderRef.current) {
-        mediaRecorderRef.current.stop();
-      }
       if (maxSessionTimerRef.current) {
         clearTimeout(maxSessionTimerRef.current);
       }
