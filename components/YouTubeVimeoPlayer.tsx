@@ -92,10 +92,25 @@ const YouTubeVimeoPlayer: React.FC<YouTubeVimeoPlayerProps> = ({ url, onError, o
   }, [onLoad, sourceInfo]);
 
   const handleError = useCallback((error: any) => {
-    console.error('WebView error:', error);
+    const errorDetails = {
+      nativeEvent: error?.nativeEvent,
+      description: error?.nativeEvent?.description,
+      code: error?.nativeEvent?.code,
+      url: error?.nativeEvent?.url,
+      canGoBack: error?.nativeEvent?.canGoBack,
+      canGoForward: error?.nativeEvent?.canGoForward,
+      loading: error?.nativeEvent?.loading,
+      title: error?.nativeEvent?.title,
+      raw: JSON.stringify(error, null, 2)
+    };
+    console.error('WebView error details:', errorDetails);
+    console.error('Error description:', error?.nativeEvent?.description || 'No description available');
+    
     setIsLoading(false);
     setHasError(true);
-    onError?.('Failed to load video');
+    
+    const errorMessage = error?.nativeEvent?.description || 'Failed to load video';
+    onError?.(errorMessage);
   }, [onError]);
 
   const handleMessage = useCallback((event: any) => {
@@ -278,6 +293,15 @@ const YouTubeVimeoPlayer: React.FC<YouTubeVimeoPlayerProps> = ({ url, onError, o
         onLoadStart={handleLoadStart}
         onLoadEnd={handleLoadEnd}
         onError={handleError}
+        onHttpError={(syntheticEvent) => {
+          const { nativeEvent } = syntheticEvent;
+          console.error('WebView HTTP error:', {
+            statusCode: nativeEvent.statusCode,
+            description: nativeEvent.description,
+            url: nativeEvent.url
+          });
+          handleError(syntheticEvent);
+        }}
         onMessage={handleMessage}
         allowsInlineMediaPlayback
         mediaPlaybackRequiresUserAction={false}

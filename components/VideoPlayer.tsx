@@ -71,9 +71,16 @@ export function VideoPlayer() {
       <View style={[styles.container, isFullscreen && styles.fullscreen]}>
         <YouTubeVimeoPlayer 
           url={uri}
-          onError={(error) => console.error('YouTube/Vimeo player error:', error)}
+          onError={(errorMsg) => {
+            console.error('YouTube/Vimeo player error:', errorMsg);
+            console.error('Error occurred while loading:', uri);
+            console.error('Platform detected:', sourceInfo.sourceInfo.platform);
+            console.error('Video ID:', sourceInfo.sourceInfo.videoId);
+          }}
           onLoad={() => {
-            console.log('YouTube/Vimeo player loaded');
+            console.log('YouTube/Vimeo player loaded successfully');
+            console.log('Video URL:', uri);
+            console.log('Platform:', sourceInfo.sourceInfo.platform);
             // Register the player for external control
             registerYouTubePlayer({
               youtubeControls: {
