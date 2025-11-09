@@ -104,7 +104,7 @@ export const [VideoPlayerProvider, useVideoPlayer] = createContextHook(() => {
     }
   }, []);
 
-  const loadVideo = useCallback(async (uri: string, title?: string, sourceInfo?: VideoSourceDetectionResult) => {
+  const loadVideo = useCallback(async (uri: string, title?: string, sourceInfo?: VideoSourceDetectionResult, skipUsageCheck = false) => {
     if (!uri?.trim()) {
       console.log('Empty URI provided to loadVideo');
       setError('Empty video URL provided');
@@ -250,6 +250,12 @@ export const [VideoPlayerProvider, useVideoPlayer] = createContextHook(() => {
       setIsLoading(false);
       console.log('✅ Video loaded successfully:', processedUri);
       
+      // Increment usage if not skipped
+      if (!skipUsageCheck) {
+        await incrementUsage();
+        console.log('✅ Usage count incremented after video load');
+      }
+      
     } catch (error) {
       console.error('❌ Error in loadVideo:', error);
       setIsLoading(false);
@@ -272,16 +278,10 @@ export const [VideoPlayerProvider, useVideoPlayer] = createContextHook(() => {
       
       throw error;
     }
-  }, [player]);
+  }, [player, incrementUsage]);
 
   const selectLocalVideo = useCallback(async () => {
     try {
-      // Check usage limits before allowing video selection
-      const remaining = getRemainingUsage();
-      if (!remaining.canUse) {
-        throw new Error('Usage limit reached. Please upgrade your membership.');
-      }
-
       const result = await DocumentPicker.getDocumentAsync({
         type: 'video/*',
         copyToCacheDirectory: true,
@@ -290,19 +290,20 @@ export const [VideoPlayerProvider, useVideoPlayer] = createContextHook(() => {
       if (!result.canceled && result.assets[0]) {
         const asset = result.assets[0];
         
-        // Increment usage count
-        const canUse = await incrementUsage();
-        if (!canUse) {
-          throw new Error('Usage limit reached during video loading.');
+        // Check usage limits before loading
+        const remaining = getRemainingUsage();
+        if (!remaining.canUse) {
+          throw new Error('Usage limit reached. Please upgrade your membership.');
         }
         
+        // Load the video (usage increment happens inside loadVideo)
         await loadVideo(asset.uri, asset.name);
       }
     } catch (error) {
       console.error('Error selecting video:', error);
       throw error;
     }
-  }, [loadVideo, incrementUsage, getRemainingUsage]);
+  }, [loadVideo, getRemainingUsage]);
 
   const play = useCallback(async () => {
     try {

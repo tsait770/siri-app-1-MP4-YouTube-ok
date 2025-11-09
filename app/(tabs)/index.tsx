@@ -41,7 +41,7 @@ export default function HomeScreen() {
     selectLocalVideo,
     clearVideo
   } = useVideoPlayer();
-  const { upgradeMembership } = useMembership();
+  const { upgradeMembership, getRemainingUsage } = useMembership();
   const { theme } = useTheme();
   const { width, height } = useWindowDimensions();
   
@@ -141,6 +141,17 @@ export default function HomeScreen() {
         new URL(urlInput.trim());
       } catch (urlError) {
         Alert.alert('Invalid URL', 'Please enter a valid URL format (e.g., https://example.com/video.mp4)', [{ text: 'OK' }]);
+        return;
+      }
+      
+      // Check usage limits before loading
+      const remaining = getRemainingUsage();
+      if (!remaining.canUse) {
+        Alert.alert(
+          'Usage Limit Reached',
+          'You have reached your video playback limit. Please upgrade your membership to continue.',
+          [{ text: 'OK' }]
+        );
         return;
       }
       
