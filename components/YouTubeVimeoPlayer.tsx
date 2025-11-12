@@ -100,8 +100,7 @@ const YouTubeVimeoPlayer: React.FC<YouTubeVimeoPlayerProps> = ({ url, onError, o
       canGoBack: error?.nativeEvent?.canGoBack,
       canGoForward: error?.nativeEvent?.canGoForward,
       loading: error?.nativeEvent?.loading,
-      title: error?.nativeEvent?.title,
-      raw: JSON.stringify(error, null, 2)
+      title: error?.nativeEvent?.title
     };
     console.error('WebView error details:', errorDetails);
     console.error('Error description:', error?.nativeEvent?.description || 'No description available');
