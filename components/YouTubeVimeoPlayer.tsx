@@ -39,10 +39,9 @@ const YouTubeVimeoPlayer: React.FC<YouTubeVimeoPlayerProps> = ({ url, onError, o
     console.log('getEmbedUrl - videoId:', sourceInfo.sourceInfo.videoId);
     
     if (sourceInfo.sourceInfo.platform === 'YouTube' && sourceInfo.sourceInfo.videoId) {
-      // For mobile, use simpler embed URL without origin parameter which can cause issues
       const embedUrl = Platform.OS === 'web' 
-        ? `https://www.youtube.com/embed/${sourceInfo.sourceInfo.videoId}?enablejsapi=1&autoplay=0&controls=1&rel=0&modestbranding=1&playsinline=1&origin=${window.location.origin}`
-        : `https://www.youtube.com/embed/${sourceInfo.sourceInfo.videoId}?autoplay=0&controls=1&rel=0&modestbranding=1&playsinline=1`;
+        ? `https://www.youtube-nocookie.com/embed/${sourceInfo.sourceInfo.videoId}?enablejsapi=1&autoplay=0&controls=1&rel=0&modestbranding=1&playsinline=1&origin=${window.location.origin}`
+        : `https://www.youtube-nocookie.com/embed/${sourceInfo.sourceInfo.videoId}?autoplay=0&controls=1&rel=0&modestbranding=1&playsinline=1`;
       console.log('getEmbedUrl - YouTube embed URL:', embedUrl);
       return embedUrl;
     } else if (sourceInfo.sourceInfo.platform === 'Vimeo' && sourceInfo.sourceInfo.videoId) {
@@ -116,26 +115,22 @@ const YouTubeVimeoPlayer: React.FC<YouTubeVimeoPlayerProps> = ({ url, onError, o
   }, [onLoad, sourceInfo]);
 
   const handleError = useCallback((error: any) => {
-    const errorDetails = {
-      nativeEvent: error?.nativeEvent,
-      description: error?.nativeEvent?.description,
-      code: error?.nativeEvent?.code,
-      url: error?.nativeEvent?.url,
-      canGoBack: error?.nativeEvent?.canGoBack,
-      canGoForward: error?.nativeEvent?.canGoForward,
-      loading: error?.nativeEvent?.loading,
-      title: error?.nativeEvent?.title
-    };
-    console.error('WebView error details:', JSON.stringify(errorDetails, null, 2));
-    console.error('Error description:', error?.nativeEvent?.description || 'No description available');
-    console.error('Error code:', error?.nativeEvent?.code || 'No code');
-    console.error('Error URL:', error?.nativeEvent?.url || 'No URL');
+    const errorCode = error?.nativeEvent?.code;
+    const errorUrl = error?.nativeEvent?.url;
+    
+    if (errorCode === -1002 && errorUrl && (errorUrl.includes('m.youtube.com') || errorUrl.includes('youtube.com'))) {
+      console.log('YouTube redirect detected, this is expected behavior. WebView will handle it.');
+      return;
+    }
+    
+    console.error('WebView error - code:', errorCode);
+    console.error('WebView error - description:', error?.nativeEvent?.description);
+    console.error('WebView error - URL:', errorUrl);
     
     setIsLoading(false);
     setHasError(true);
     
     const errorMessage = error?.nativeEvent?.description || 'Failed to load video';
-    console.error('Final error message passed to parent:', errorMessage);
     onError?.(errorMessage);
   }, [onError]);
 
@@ -320,12 +315,13 @@ const YouTubeVimeoPlayer: React.FC<YouTubeVimeoPlayerProps> = ({ url, onError, o
         onError={handleError}
         onHttpError={(syntheticEvent) => {
           const { nativeEvent } = syntheticEvent;
-          console.error('WebView HTTP error:', JSON.stringify({
-            statusCode: nativeEvent.statusCode,
-            description: nativeEvent.description,
-            url: nativeEvent.url
-          }, null, 2));
-          handleError(syntheticEvent);
+          console.error('WebView HTTP error - statusCode:', nativeEvent.statusCode);
+          console.error('WebView HTTP error - description:', nativeEvent.description);
+          console.error('WebView HTTP error - url:', nativeEvent.url);
+          
+          if (nativeEvent.statusCode >= 400) {
+            handleError(syntheticEvent);
+          }
         }}
         onMessage={handleMessage}
         allowsInlineMediaPlayback={true}
@@ -338,6 +334,16 @@ const YouTubeVimeoPlayer: React.FC<YouTubeVimeoPlayerProps> = ({ url, onError, o
         originWhitelist={['*']}
         allowsFullscreenVideo={true}
         bounces={false}
+        sharedCookiesEnabled={true}
+        thirdPartyCookiesEnabled={true}
+        allowFileAccess={true}
+        allowUniversalAccessFromFileURLs={true}
+        onShouldStartLoadWithRequest={(event) => {
+          if (event.url.includes('youtube.com') || event.url.includes('youtu.be') || event.url.includes('youtube-nocookie.com')) {
+            return true;
+          }
+          return true;
+        }}
         injectedJavaScript={`
           // Load YouTube API
           if (!window.YT && !window.ytApiLoading) {
