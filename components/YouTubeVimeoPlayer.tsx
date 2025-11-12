@@ -39,7 +39,10 @@ const YouTubeVimeoPlayer: React.FC<YouTubeVimeoPlayerProps> = ({ url, onError, o
     console.log('getEmbedUrl - videoId:', sourceInfo.sourceInfo.videoId);
     
     if (sourceInfo.sourceInfo.platform === 'YouTube' && sourceInfo.sourceInfo.videoId) {
-      const embedUrl = `https://www.youtube.com/embed/${sourceInfo.sourceInfo.videoId}?enablejsapi=1&autoplay=0&controls=1&rel=0&modestbranding=1&playsinline=1&origin=${Platform.OS === 'web' ? window.location.origin : 'https://localhost'}`;
+      // For mobile, use simpler embed URL without origin parameter which can cause issues
+      const embedUrl = Platform.OS === 'web' 
+        ? `https://www.youtube.com/embed/${sourceInfo.sourceInfo.videoId}?enablejsapi=1&autoplay=0&controls=1&rel=0&modestbranding=1&playsinline=1&origin=${window.location.origin}`
+        : `https://www.youtube.com/embed/${sourceInfo.sourceInfo.videoId}?autoplay=0&controls=1&rel=0&modestbranding=1&playsinline=1`;
       console.log('getEmbedUrl - YouTube embed URL:', embedUrl);
       return embedUrl;
     } else if (sourceInfo.sourceInfo.platform === 'Vimeo' && sourceInfo.sourceInfo.videoId) {
@@ -123,13 +126,16 @@ const YouTubeVimeoPlayer: React.FC<YouTubeVimeoPlayerProps> = ({ url, onError, o
       loading: error?.nativeEvent?.loading,
       title: error?.nativeEvent?.title
     };
-    console.error('WebView error details:', errorDetails);
+    console.error('WebView error details:', JSON.stringify(errorDetails, null, 2));
     console.error('Error description:', error?.nativeEvent?.description || 'No description available');
+    console.error('Error code:', error?.nativeEvent?.code || 'No code');
+    console.error('Error URL:', error?.nativeEvent?.url || 'No URL');
     
     setIsLoading(false);
     setHasError(true);
     
     const errorMessage = error?.nativeEvent?.description || 'Failed to load video';
+    console.error('Final error message passed to parent:', errorMessage);
     onError?.(errorMessage);
   }, [onError]);
 
@@ -306,10 +312,7 @@ const YouTubeVimeoPlayer: React.FC<YouTubeVimeoPlayerProps> = ({ url, onError, o
       <WebView
         ref={webViewRef}
         source={{ 
-          uri: embedUrl,
-          headers: {
-            'Referer': 'https://localhost'
-          }
+          uri: embedUrl
         }}
         style={styles.webview}
         onLoadStart={handleLoadStart}
@@ -317,22 +320,24 @@ const YouTubeVimeoPlayer: React.FC<YouTubeVimeoPlayerProps> = ({ url, onError, o
         onError={handleError}
         onHttpError={(syntheticEvent) => {
           const { nativeEvent } = syntheticEvent;
-          console.error('WebView HTTP error:', {
+          console.error('WebView HTTP error:', JSON.stringify({
             statusCode: nativeEvent.statusCode,
             description: nativeEvent.description,
             url: nativeEvent.url
-          });
+          }, null, 2));
           handleError(syntheticEvent);
         }}
         onMessage={handleMessage}
-        allowsInlineMediaPlayback
+        allowsInlineMediaPlayback={true}
         mediaPlaybackRequiresUserAction={false}
-        javaScriptEnabled
-        domStorageEnabled
+        javaScriptEnabled={true}
+        domStorageEnabled={true}
         startInLoadingState={false}
-        scalesPageToFit
-        mixedContentMode="compatibility"
+        scalesPageToFit={true}
+        mixedContentMode="always"
         originWhitelist={['*']}
+        allowsFullscreenVideo={true}
+        bounces={false}
         injectedJavaScript={`
           // Load YouTube API
           if (!window.YT && !window.ytApiLoading) {

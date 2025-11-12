@@ -77,10 +77,15 @@ export function VideoPlayer() {
         <YouTubeVimeoPlayer 
           url={uri}
           onError={(errorMsg) => {
-            console.error('YouTube/Vimeo player error:', errorMsg);
-            console.error('Error occurred while loading:', uri);
-            console.error('Platform detected:', sourceInfo.sourceInfo.platform);
+            console.error('=== YouTube/Vimeo Player Error ===');
+            console.error('Error Message:', errorMsg);
+            console.error('URL:', uri);
+            console.error('Platform:', sourceInfo.sourceInfo.platform);
             console.error('Video ID:', sourceInfo.sourceInfo.videoId);
+            console.error('Is Supported:', sourceInfo.isSupported);
+            console.error('Type:', sourceInfo.sourceInfo.type);
+            console.error('Description:', sourceInfo.sourceInfo.description);
+            console.error('===========================');
           }}
           onLoad={() => {
             console.log('YouTube/Vimeo player loaded successfully');
