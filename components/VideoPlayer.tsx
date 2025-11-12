@@ -67,6 +67,11 @@ export function VideoPlayer() {
   const isYouTubeOrVimeo = sourceInfo.sourceInfo.platform === 'YouTube' || sourceInfo.sourceInfo.platform === 'Vimeo';
 
   if (isYouTubeOrVimeo) {
+    console.log('Rendering YouTubeVimeoPlayer component for URL:', uri);
+    console.log('Platform:', sourceInfo.sourceInfo.platform);
+    console.log('Video ID:', sourceInfo.sourceInfo.videoId);
+    console.log('Is Supported:', sourceInfo.isSupported);
+    
     return (
       <View style={[styles.container, isFullscreen && styles.fullscreen]}>
         <YouTubeVimeoPlayer 

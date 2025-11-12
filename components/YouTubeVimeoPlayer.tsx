@@ -20,14 +20,35 @@ const YouTubeVimeoPlayer: React.FC<YouTubeVimeoPlayerProps> = ({ url, onError, o
   const insets = useSafeAreaInsets();
 
   const sourceInfo = detectVideoSource(url);
+  
+  // Debug logging
+  useEffect(() => {
+    console.log('YouTubeVimeoPlayer - Source Info:', {
+      url,
+      isSupported: sourceInfo.isSupported,
+      platform: sourceInfo.sourceInfo.platform,
+      videoId: sourceInfo.sourceInfo.videoId,
+      type: sourceInfo.sourceInfo.type,
+      description: sourceInfo.sourceInfo.description
+    });
+  }, [url, sourceInfo]);
 
   // 獲取嵌入URL with API enabled
   const getEmbedUrl = useCallback(() => {
+    console.log('getEmbedUrl - checking platform:', sourceInfo.sourceInfo.platform);
+    console.log('getEmbedUrl - videoId:', sourceInfo.sourceInfo.videoId);
+    
     if (sourceInfo.sourceInfo.platform === 'YouTube' && sourceInfo.sourceInfo.videoId) {
-      return `https://www.youtube.com/embed/${sourceInfo.sourceInfo.videoId}?enablejsapi=1&autoplay=0&controls=1&rel=0&modestbranding=1&playsinline=1&origin=${Platform.OS === 'web' ? window.location.origin : 'https://localhost'}`;
+      const embedUrl = `https://www.youtube.com/embed/${sourceInfo.sourceInfo.videoId}?enablejsapi=1&autoplay=0&controls=1&rel=0&modestbranding=1&playsinline=1&origin=${Platform.OS === 'web' ? window.location.origin : 'https://localhost'}`;
+      console.log('getEmbedUrl - YouTube embed URL:', embedUrl);
+      return embedUrl;
     } else if (sourceInfo.sourceInfo.platform === 'Vimeo' && sourceInfo.sourceInfo.videoId) {
-      return `https://player.vimeo.com/video/${sourceInfo.sourceInfo.videoId}?autoplay=0&playsinline=1&api=1`;
+      const embedUrl = `https://player.vimeo.com/video/${sourceInfo.sourceInfo.videoId}?autoplay=0&playsinline=1&api=1`;
+      console.log('getEmbedUrl - Vimeo embed URL:', embedUrl);
+      return embedUrl;
     }
+    
+    console.log('getEmbedUrl - returning null (no match)');
     return null;
   }, [sourceInfo]);
 
@@ -191,13 +212,15 @@ const YouTubeVimeoPlayer: React.FC<YouTubeVimeoPlayerProps> = ({ url, onError, o
   }, [sourceInfo, registerYouTubePlayer]);
 
   // 處理不支援的源
-  if (!sourceInfo.isSupported || (sourceInfo.sourceInfo.platform !== 'YouTube' && sourceInfo.sourceInfo.platform !== 'Vimeo')) {
+  // Only show error if it's actually not YouTube or Vimeo
+  if (sourceInfo.sourceInfo.platform !== 'YouTube' && sourceInfo.sourceInfo.platform !== 'Vimeo') {
     return (
       <View style={styles.errorContainer}>
         <View style={styles.errorContent}>
           <AlertCircle size={48} color="#ef4444" />
           <Text style={styles.errorText}>不支援的視頻格式或平台</Text>
           <Text style={styles.platformText}>僅支援 YouTube 和 Vimeo 視頻</Text>
+          <Text style={styles.platformText}>檢測到的平台: {sourceInfo.sourceInfo.platform}</Text>
         </View>
       </View>
     );

@@ -286,42 +286,57 @@ export function convertYouTubeToEmbedUrl(url: string): string | null {
 
 export function getYouTubeVideoId(url: string): string | null {
   if (!url || typeof url !== 'string') {
+    console.log('getYouTubeVideoId - Invalid URL provided:', url);
     return null;
   }
+
+  console.log('getYouTubeVideoId - Processing URL:', url);
 
   // Extract video ID from various YouTube URL formats with comprehensive patterns
   let videoId: string | null = null;
 
-  // Standard YouTube URL: https://www.youtube.com/watch?v=VIDEO_ID (with optional parameters)
-  const standardMatch = url.match(/(?:youtube\.com\/watch\?.*[&?]v=|youtube\.com\/watch\?v=)([\w-]+)/i);
-  if (standardMatch) {
-    videoId = standardMatch[1];
-  }
-
-  // Short YouTube URL: https://youtu.be/VIDEO_ID (with optional parameters)
+  // Short YouTube URL: https://youtu.be/VIDEO_ID (with optional parameters) - CHECK THIS FIRST
   const shortMatch = url.match(/youtu\.be\/([\w-]+)(?:[?&][^\s]*)?/i);
   if (shortMatch) {
     videoId = shortMatch[1];
+    console.log('getYouTubeVideoId - Matched short URL, videoId:', videoId);
+  }
+
+  // Standard YouTube URL: https://www.youtube.com/watch?v=VIDEO_ID (with optional parameters)
+  if (!videoId) {
+    const standardMatch = url.match(/(?:youtube\.com\/watch\?.*[&?]v=|youtube\.com\/watch\?v=)([\w-]+)/i);
+    if (standardMatch) {
+      videoId = standardMatch[1];
+      console.log('getYouTubeVideoId - Matched standard URL, videoId:', videoId);
+    }
   }
 
   // YouTube embed URL: https://www.youtube.com/embed/VIDEO_ID (with optional parameters)
-  const embedMatch = url.match(/youtube\.com\/embed\/([\w-]+)(?:[?&][^\s]*)?/i);
-  if (embedMatch) {
-    videoId = embedMatch[1];
+  if (!videoId) {
+    const embedMatch = url.match(/youtube\.com\/embed\/([\w-]+)(?:[?&][^\s]*)?/i);
+    if (embedMatch) {
+      videoId = embedMatch[1];
+      console.log('getYouTubeVideoId - Matched embed URL, videoId:', videoId);
+    }
   }
 
   // YouTube v URL: https://www.youtube.com/v/VIDEO_ID (with optional parameters)
-  const vMatch = url.match(/youtube\.com\/v\/([\w-]+)(?:[?&][^\s]*)?/i);
-  if (vMatch) {
-    videoId = vMatch[1];
+  if (!videoId) {
+    const vMatch = url.match(/youtube\.com\/v\/([\w-]+)(?:[?&][^\s]*)?/i);
+    if (vMatch) {
+      videoId = vMatch[1];
+      console.log('getYouTubeVideoId - Matched v URL, videoId:', videoId);
+    }
   }
 
   if (videoId) {
     // Clean the video ID (remove any additional parameters)
     videoId = videoId.split('&')[0].split('?')[0];
+    console.log('getYouTubeVideoId - Final cleaned videoId:', videoId);
     return videoId;
   }
 
+  console.log('getYouTubeVideoId - No match found, returning null');
   return null;
 }
 
